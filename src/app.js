@@ -164,7 +164,7 @@ window.createRoom = function() {
   document.getElementById('room-created').style.display = 'flex';
   state.username = name;
   state.userColor = selectedCreateColor;
-  state.roomId = 'miroclone-' + currentRoomCode;
+  state.roomId = 'diro-' + currentRoomCode;
   setTimeout(()=> launchApp(), 2500);
 };
 
@@ -256,7 +256,7 @@ function initYjs() {
   state.ydoc = new Y.Doc();
   state.yObjects = state.ydoc.getMap('objects');
 
-  state.provider = new Y.WebsocketProvider(
+  state.provider = new WebsocketProvider(
     'wss://demos.yjs.dev',
     state.roomId,
     state.ydoc
@@ -268,18 +268,18 @@ function initYjs() {
       setStatus('Senkronize — ' + state.username);
       showToast('Oda bağlantısı kuruldu!');
       loadFromYDoc();
+    } else if (event.status === 'disconnected') {
+      setConnStatus('disconnected', 'Bağlantı yok');
     }
   });
 
-  // Observe shared map
   state.yObjects.observe(onYObjectChange);
 }
-
 // ── BroadcastChannel Fallback (same browser) ─────────────────
 let bc = null;
 function initBroadcastFallback() {
   setConnStatus('connected', 'Bağlandı (Yerel)');
-  bc = new BroadcastChannel('miroclone-' + state.roomId);
+ bc = new BroadcastChannel(state.roomId);
   bc.onmessage = (e) => {
     const { type, data } = e.data;
     if(type === 'object:add') addObjectFromRemote(data);
@@ -326,12 +326,12 @@ function onYObjectChange(event) {
 }
 
 function updateCanvasFromYjs(id, data) {
-  // Check if object already exists
   const existing = state.canvas.getObjects().find(o => o._id === id);
-  if(existing) {
-    // Update properties
+
+  if (existing) {
     state.syncing = true;
-    existing.set(data.props || {});
+    existing.set(data);
+    existing.setCoords();
     state.canvas.renderAll();
     state.syncing = false;
   } else {
