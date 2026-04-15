@@ -263,17 +263,28 @@ function broadcastFullSync() {
 
 function receiveFullSync(objects) {
   if (!objects || !objects.length) return;
+  
   state.syncing = true;
   state.canvas.clear();
   state.canvas.renderAll();
-  state.syncing = false;
+  // syncing burada false YAPMA
 
-  // Add objects one by one with a tiny delay so Fabric can breathe
+  let remaining = objects.length;
+  if (remaining === 0) { state.syncing = false; return; }
+
   objects.forEach((objData, i) => {
-    setTimeout(() => deserializeAndAdd(objData, true), i * 10);
+    setTimeout(() => {
+      deserializeAndAdd(objData, true);
+      remaining--;
+      if (remaining === 0) {
+        state.syncing = false;
+        state.canvas.renderAll();
+        setStatus('Canvas senkronize edildi');
+      }
+    }, i * 10);
   });
-  setStatus('Canvas senkronize edildi');
 }
+
 
 function onRemoteUserJoin(data) {
   state.peers[data.id] = data;
@@ -746,10 +757,8 @@ function syncRemove(id) {
 function addObjectFromRemote(data) {
   if (!data || !data._id) return;
   const exists = state.canvas.getObjects().find(o => o._id === data._id);
-  if (exists) return; // already have it
-  state.syncing = true;
+  if (exists) return;
   deserializeAndAdd(data, true);
-  state.syncing = false;
 }
 
 function modifyObjectFromRemote(data) {
@@ -758,13 +767,12 @@ function modifyObjectFromRemote(data) {
   if (existing) {
     state.syncing = true;
     existing.set(data);
-    // Restore custom props that fabric.set() doesn't restore
     CUSTOM_PROPS.forEach(p => { if (data[p] !== undefined) existing[p] = data[p]; });
     existing.setCoords();
     state.canvas.renderAll();
     state.syncing = false;
   } else {
-    addObjectFromRemote(data);
+    deserializeAndAdd(data, true);  // addObjectFromRemote'u çağırma, direkt deserialize et
   }
 }
 
@@ -785,18 +793,18 @@ function removeObjectById(id) {
 function deserializeAndAdd(data, fromRemote) {
   if (!data || !data.type) return;
 
-  // Fabric 5.x: enlivenObjects signature is (objects, callback, namespace, reviver)
+  const wasSyncing = state.syncing;
+  state.syncing = true;  // callback süresince koru
+
   fabric.util.enlivenObjects([data], (objects) => {
     objects.forEach(obj => {
-      // Restore custom properties (enlivenObjects drops unknown props)
       CUSTOM_PROPS.forEach(p => { if (data[p] !== undefined) obj[p] = data[p]; });
-
-      // Avoid duplicates
       if (state.canvas.getObjects().find(o => o._id === obj._id)) return;
-
       state.canvas.add(obj);
     });
     state.canvas.renderAll();
+    // Sadece bu çağrı için syncing'i açmıştık, önceki duruma döndür
+    if (!wasSyncing) state.syncing = false;
   }, 'fabric');
 }
 
