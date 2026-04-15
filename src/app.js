@@ -256,19 +256,13 @@ function initYjs() {
   state.ydoc = new Y.Doc();
   state.yObjects = state.ydoc.getMap('objects');
 
-  try {
-    state.provider = new YWebrtcProvider(state.roomId, state.ydoc, {
-      signaling: [
-        'wss://signaling.yjs.dev',
-        'wss://y-webrtc-signaling-eu.herokuapp.com',
-        'wss://y-webrtc-signaling-us.herokuapp.com',
-      ],
-      password: null,
-      awareness: undefined,
-      maxConns: 20,
-      filterBcConns: true,
-      peerOpts: {}
-    });
+try {
+  state.provider = new YWebrtcProvider(state.roomId, state.ydoc, {
+    signaling: ['wss://signaling.yjs.dev'],
+    maxConns: 20,
+    filterBcConns: true,
+    peerOpts: {}
+  });
 
     state.awareness = state.provider.awareness;
 
@@ -302,7 +296,6 @@ function initYjs() {
     // Observe shared map
     state.yObjects.observe(onYObjectChange);
 
-    setConnStatus('connected', 'Bağlandı (WebRTC)');
 
   } catch(e) {
     // Fallback: BroadcastChannel for same-browser multi-tab
