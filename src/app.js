@@ -256,52 +256,23 @@ function initYjs() {
   state.ydoc = new Y.Doc();
   state.yObjects = state.ydoc.getMap('objects');
 
-try {
-  state.provider = new YWebrtcProvider(state.roomId, state.ydoc, {
-    signaling: ['wss://signaling.yjs.dev'],
-    maxConns: 20,
-    filterBcConns: true,
-    peerOpts: {}
+  state.provider = new Y.WebsocketProvider(
+    'wss://demos.yjs.dev',
+    state.roomId,
+    state.ydoc
+  );
+
+  state.provider.on('status', (event) => {
+    if (event.status === 'connected') {
+      setConnStatus('connected', 'Bağlandı');
+      setStatus('Senkronize — ' + state.username);
+      showToast('Oda bağlantısı kuruldu!');
+      loadFromYDoc();
+    }
   });
 
-    state.awareness = state.provider.awareness;
-
-    state.awareness.setLocalStateField('user', {
-      id: uid(),
-      username: state.username,
-      color: state.userColor,
-    });
-    state.awareness.setLocalStateField('cursor', { x: 0, y: 0 });
-
-    state.provider.on('synced', ({ synced }) => {
-      if(synced){
-        setConnStatus('connected', 'Bağlandı');
-        setStatus('Senkronize — ' + state.username);
-        showToast('Oda bağlantısı kuruldu!');
-        loadFromYDoc();
-      }
-    });
-
-    state.provider.on('peers', ({ added, removed }) => {
-      if(added.length) showToast(`${added.length} kullanıcı bağlandı`);
-      if(removed.length) {
-        removed.forEach(id => removePeerCursor(id));
-        showToast(`${removed.length} kullanıcı ayrıldı`);
-      }
-      updateUsersBar();
-    });
-
-    state.awareness.on('change', onAwarenessChange);
-
-    // Observe shared map
-    state.yObjects.observe(onYObjectChange);
-
-
-  } catch(e) {
-    // Fallback: BroadcastChannel for same-browser multi-tab
-    console.warn('WebRTC failed, falling back to BroadcastChannel:', e);
-    initBroadcastFallback();
-  }
+  // Observe shared map
+  state.yObjects.observe(onYObjectChange);
 }
 
 // ── BroadcastChannel Fallback (same browser) ─────────────────
