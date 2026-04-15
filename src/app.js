@@ -175,7 +175,7 @@ window.joinRoom = function() {
   if(!code || code.length < 4){ showToast('Geçerli bir oda kodu gir!'); return; }
   state.username = name;
   state.userColor = selectedJoinColor;
-  state.roomId = 'miroclone-' + code;
+  state.roomId = 'diro-' + code;
   currentRoomCode = code;
   launchApp();
 };
