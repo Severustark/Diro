@@ -636,17 +636,10 @@
     <script src="https://js.pusher.com/8.4.0/pusher.min.js"></script>
 
     <script>
-      Pusher.logToConsole = true;
-
-      const pusher = new Pusher("a4638af15727d57991ff", {
+      window.PUSHER_CONFIG = {
+        key: "a4638af15727d57991ff",
         cluster: "eu",
-      });
-
-      const channel = pusher.subscribe("diro-room");
-
-      channel.bind("object:add", function (data) {
-        console.log("GELDİ:", data);
-      });
+      };
     </script>
 
     <script src="src/app.js"></script>

@@ -374,3 +374,11 @@ body {
 }
 .sticky-color-dot:hover { transform: scale(1.2); }
 .sticky-color-dot.active { border-color: white; }
+
+
+#cursors-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 20;
+}
