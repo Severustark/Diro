@@ -632,9 +632,23 @@
     </div>
 
     <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/yjs@13.6.14/dist/yjs.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
-    <script src="https://unpkg.com/y-websocket/dist/y-websocket.js"></script>
+    <script src="https://js.pusher.com/8.4.0/pusher.min.js"></script>
+
+    <script>
+      Pusher.logToConsole = true;
+
+      const pusher = new Pusher("a4638af15727d57991ff", {
+        cluster: "eu",
+      });
+
+      const channel = pusher.subscribe("diro-room");
+
+      channel.bind("object:add", function (data) {
+        console.log("GELDİ:", data);
+      });
+    </script>
+
     <script src="src/app.js"></script>
   </body>
 </html>

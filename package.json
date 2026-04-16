@@ -1,0 +1,24 @@
+{
+  "name": "miro-clone",
+  "version": "1.0.0",
+  "description": "Miro benzeri, çok kullanıcılı, gerçek zamanlı beyaz tahta uygulaması.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Severustark/Diro.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Severustark/Diro/issues"
+  },
+  "homepage": "https://github.com/Severustark/Diro#readme",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "pusher": "^5.3.3"
+  }
+}
