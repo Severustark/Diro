@@ -43,6 +43,134 @@ const state = {
   peers: {},    // peerId → { username, color, cursor }
 };
 
+// ── Realtime helpers ─────────────────────────────────────────
+let bc = null;
+let localAwarenessInterval = null;
+let connectionWatchdog = null;
+
+function getWsProviderClass() {
+  if (typeof WebsocketProvider !== 'undefined') return WebsocketProvider;
+  if (typeof window !== 'undefined' && window.WebsocketProvider) return window.WebsocketProvider;
+  if (typeof window !== 'undefined' && window.yws && window.yws.WebsocketProvider) {
+    return window.yws.WebsocketProvider;
+  }
+  return null;
+}
+
+function setupBroadcastChannel() {
+  if (bc) return;
+
+  try {
+    bc = new BroadcastChannel('diro-room-' + state.roomId);
+  } catch (err) {
+    console.warn('BroadcastChannel kurulamadı:', err);
+    bc = null;
+    return;
+  }
+
+  bc.onmessage = (event) => {
+    const msg = event.data;
+    if (!msg || !msg.type) return;
+
+    if (msg.sender === state.username) return;
+
+    switch (msg.type) {
+      case 'cursor':
+        if (msg.data) updateRemoteCursor(msg.data);
+        break;
+
+      case 'awareness':
+        if (msg.data) {
+          updateRemoteCursor({
+            peerId: msg.data.peerId,
+            username: msg.data.username,
+            color: msg.data.color,
+            x: msg.data.x,
+            y: msg.data.y
+          });
+          updateUsersBarFromBroadcast(msg.data);
+        }
+        break;
+
+      case 'object:add':
+        if (msg.data) addObjectFromRemote(msg.data);
+        break;
+
+      case 'object:modify':
+        if (msg.data) modifyObjectFromRemote(msg.data);
+        break;
+
+      case 'object:remove':
+        if (msg.data && msg.data.id) removeObjectFromRemote(msg.data.id);
+        break;
+
+      case 'canvas:clear':
+        state.syncing = true;
+        state.canvas.clear();
+        state.syncing = false;
+        state.canvas.renderAll();
+        break;
+    }
+  };
+}
+
+function updateUsersBarFromBroadcast(user) {
+  if (!user) return;
+
+  const bar = document.getElementById('users-bar');
+  if (!bar) return;
+
+  const peerId = 'bc-' + (user.peerId || user.username || 'peer');
+  let av = document.getElementById(peerId);
+
+  if (!av) {
+    av = document.createElement('div');
+    av.id = peerId;
+    av.className = 'user-avatar';
+    bar.appendChild(av);
+  }
+
+  av.style.background = user.color || '#888';
+  av.textContent = (user.username || '?').slice(0, 2).toUpperCase();
+  av.title = user.username || 'Katılımcı';
+}
+
+function startLocalAwarenessBroadcast() {
+  if (!bc) return;
+  if (localAwarenessInterval) clearInterval(localAwarenessInterval);
+
+  localAwarenessInterval = setInterval(() => {
+    bc.postMessage({
+      type: 'awareness',
+      sender: state.username,
+      data: {
+        peerId: 'bc-' + state.username,
+        username: state.username,
+        color: state.userColor,
+        x: 0,
+        y: 0
+      }
+    });
+  }, 2000);
+}
+
+function stopRealtimeHelpers() {
+  if (connectionWatchdog) {
+    clearTimeout(connectionWatchdog);
+    connectionWatchdog = null;
+  }
+
+  if (localAwarenessInterval) {
+    clearInterval(localAwarenessInterval);
+    localAwarenessInterval = null;
+  }
+
+  if (bc) {
+    bc.close();
+    bc = null;
+  }
+}
+
 // ── Utilities ────────────────────────────────────────────────
 function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -185,8 +313,16 @@ window.copyRoomCode = function() {
 };
 
 window.leaveRoom = function() {
-  if(state.provider){ state.provider.destroy(); }
-  if(state.ydoc){ state.ydoc.destroy(); }
+  stopRealtimeHelpers();
+
+  if (state.provider) {
+    try { state.provider.destroy(); } catch (e) {}
+  }
+
+  if (state.ydoc) {
+    try { state.ydoc.destroy(); } catch (e) {}
+  }
+
   location.reload();
 };
 
@@ -251,46 +387,85 @@ function initCanvas() {
 // ── Yjs Init ─────────────────────────────────────────────────
 function initYjs() {
   setConnStatus('connecting', 'Bağlanıyor...');
-  setStatus('Yjs CRDT başlatılıyor...');
+  setStatus('Gerçek zamanlı bağlantı başlatılıyor...');
+
+  setupBroadcastChannel();
+  startLocalAwarenessBroadcast();
 
   state.ydoc = new Y.Doc();
   state.yObjects = state.ydoc.getMap('objects');
-
-  state.provider = new WebsocketProvider(
-    'wss://demos.yjs.dev',
-    state.roomId,
-    state.ydoc
-  );
-
-  state.awareness = state.provider.awareness;
-
-  state.awareness.setLocalStateField('user', {
-    id: uid(),
-    username: state.username,
-    color: state.userColor
-  });
-
-  state.awareness.setLocalStateField('cursor', { x: 0, y: 0 });
-
-  state.awareness.on('change', onAwarenessChange);
-
-  state.provider.on('status', (event) => {
-    if (event.status === 'connected') {
-      setConnStatus('connected', 'Bağlandı');
-      setStatus('Senkronize — ' + state.username);
-      showToast('Oda bağlantısı kuruldu!');
-    } else if (event.status === 'disconnected') {
-      setConnStatus('disconnected', 'Bağlantı yok');
-    }
-  });
-
-  state.provider.on('sync', (isSynced) => {
-    if (isSynced) {
-      loadFromYDoc();
-    }
-  });
-
   state.yObjects.observe(onYObjectChange);
+
+  const WsProvider = getWsProviderClass();
+
+  if (!WsProvider) {
+    console.warn('WebsocketProvider bulunamadı. Yerel BroadcastChannel moduna düşülüyor.');
+    setConnStatus('disconnected', 'Yerel senkron');
+    setStatus('WebSocket yok — aynı tarayıcı sekmeleri arasında senkron aktif');
+    showToast('Sunucu bağlantısı yok, yerel sekme senkronu aktif.');
+    return;
+  }
+
+  try {
+    state.provider = new WsProvider(
+      'wss://demos.yjs.dev',
+      state.roomId,
+      state.ydoc
+    );
+
+    state.awareness = state.provider.awareness;
+
+    if (state.awareness) {
+      state.awareness.setLocalStateField('user', {
+        id: uid(),
+        username: state.username,
+        color: state.userColor
+      });
+
+      state.awareness.setLocalStateField('cursor', { x: 0, y: 0 });
+      state.awareness.on('change', onAwarenessChange);
+    }
+
+    state.provider.on('status', (event) => {
+      if (event.status === 'connected') {
+        if (connectionWatchdog) {
+          clearTimeout(connectionWatchdog);
+          connectionWatchdog = null;
+        }
+
+        setConnStatus('connected', 'Bağlandı');
+        setStatus('Senkronize — ' + state.username);
+        showToast('Oda bağlantısı kuruldu!');
+      } else if (event.status === 'disconnected') {
+        setConnStatus('disconnected', 'Yerel senkron');
+        setStatus('WebSocket koptu — aynı tarayıcı sekmeleri arasında senkron aktif');
+      }
+    });
+
+    state.provider.on('sync', (isSynced) => {
+      if (isSynced) {
+        loadFromYDoc();
+      }
+    });
+
+    connectionWatchdog = setTimeout(() => {
+      const stillNotConnected =
+        !state.provider ||
+        !state.provider.wsconnected;
+
+      if (stillNotConnected) {
+        setConnStatus('disconnected', 'Yerel senkron');
+        setStatus('Sunucuya bağlanılamadı — aynı tarayıcı sekmeleri arasında senkron aktif');
+        showToast('WebSocket bağlanamadı. Yerel sekme senkronu aktif.');
+      }
+    }, 4000);
+
+  } catch (err) {
+    console.error('initYjs hatası:', err);
+    setConnStatus('disconnected', 'Yerel senkron');
+    setStatus('Bağlantı hatası — aynı tarayıcı sekmeleri arasında senkron aktif');
+    showToast('Bağlantı hatası oldu, yerel sekme senkronu aktif.');
+  }
 }
 
 // ── Yjs Observe ──────────────────────────────────────────────
@@ -343,17 +518,23 @@ function broadcastCursor(e) {
   const rect = document.getElementById('canvas-container').getBoundingClientRect();
   const x = (e.clientX - rect.left - state.panX) / state.zoom;
   const y = (e.clientY - rect.top - state.panY) / state.zoom;
-  if(state.awareness) {
+
+  if (state.awareness) {
     state.awareness.setLocalStateField('cursor', { x, y });
   }
-  if(bc) {
-    bc.postMessage({ type: 'cursor', data: {
-      peerId: 'local-' + state.username,
-      username: state.username,
-      color: state.userColor,
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    }});
+
+  if (bc) {
+    bc.postMessage({
+      type: 'cursor',
+      sender: state.username,
+      data: {
+        peerId: 'bc-' + state.username,
+        username: state.username,
+        color: state.userColor,
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      }
+    });
   }
 }
 
@@ -906,6 +1087,12 @@ window.clearCanvas = function() {
       state.yObjects.forEach((v, k) => state.yObjects.delete(k));
     });
   }
+    if (bc) {
+    bc.postMessage({
+      type: 'canvas:clear',
+      sender: state.username
+    });
+  }
   setStatus('Tuval temizlendi');
 };
 
@@ -919,33 +1106,60 @@ function serializeObject(obj) {
 }
 
 function syncAdd(obj) {
-  if(state.syncing) return;
-  const data = obj.toObject(['_id', '_owner', '_type']);
+  if (state.syncing) return;
+  const data = obj.toObject(['_id', '_owner', '_type', '_noteId', '_linkedTextId', '_linkedRectId']);
   data._id = obj._id;
 
-  if(state.yObjects) {
+  if (state.yObjects) {
     state.ydoc.transact(() => {
       state.yObjects.set(obj._id, data);
+    });
+  }
+
+  if (bc) {
+    bc.postMessage({
+      type: 'object:add',
+      sender: state.username,
+      data
     });
   }
 }
 
 function syncModify(obj) {
-  if(state.syncing) return;
-  const data = obj.toObject(['_id', '_owner', '_type']);
+  if (state.syncing) return;
+  const data = obj.toObject(['_id', '_owner', '_type', '_noteId', '_linkedTextId', '_linkedRectId']);
   data._id = obj._id;
 
-  if(state.yObjects && obj._id) {
+  if (state.yObjects && obj._id) {
     state.ydoc.transact(() => {
       state.yObjects.set(obj._id, data);
     });
   }
+
+  if (bc) {
+    bc.postMessage({
+      type: 'object:modify',
+      sender: state.username,
+      data
+    });
+  }
+
   setStatus('Değişiklik senkronize edildi');
 }
 
 function syncRemove(id) {
-  if(state.yObjects) {
-    state.ydoc.transact(() => { state.yObjects.delete(id); });
+  if (state.yObjects) {
+    state.ydoc.transact(() => {
+      state.yObjects.delete(id);
+    });
+  }
+
+  if (bc) {
+    bc.postMessage({
+      type: 'object:remove',
+      sender: state.username,
+      data: { id }
+    });
   }
 }
 
@@ -983,18 +1197,26 @@ function removeObjectFromRemote(id) {
 }
 
 function deserializeAndAdd(data, fromRemote) {
-  if(!data || !data.type) return;
+  if (!data || !data.type) return;
 
-  const enlivenCallback = (objects) => {
+  fabric.util.enlivenObjects([data], function(objects) {
     objects.forEach(obj => {
+      const existing = state.canvas.getObjects().find(o => o._id === data._id);
+      if (existing) return;
+
       obj._id = data._id || uid();
       obj._owner = data._owner || 'unknown';
+
+      if (data._type) obj._type = data._type;
+      if (data._noteId) obj._noteId = data._noteId;
+      if (data._linkedTextId) obj._linkedTextId = data._linkedTextId;
+      if (data._linkedRectId) obj._linkedRectId = data._linkedRectId;
+
       state.canvas.add(obj);
     });
-    state.canvas.renderAll();
-  };
 
-  fabric.util.enlivenObjects([data], enlivenCallback);
+    state.canvas.renderAll();
+  });
 }
 
 // ── Property Controls ─────────────────────────────────────────
@@ -1123,3 +1345,4 @@ style.textContent = `
 }
 `;
 document.head.appendChild(style);
+
